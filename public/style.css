@@ -54,6 +54,8 @@ main { max-width: 720px; margin: 0 auto; padding: 12px 14px; }
 .quick-card.red { background: var(--red); color: #fff; border-color: var(--red); font-weight: 700; }
 .quick-card.green { background: var(--green); color: #fff; border-color: var(--green); font-weight: 700; }
 .quick-card.fb { background: var(--fb-blue); color: #fff; border-color: var(--fb-blue); font-weight: 600; }
+.quick-card.messenger { background: #0084FF; color: #fff; border-color: #0084FF; font-weight: 600; }
+.quick-card.whatsapp { background: #25D366; color: #fff; border-color: #25D366; font-weight: 600; }
 
 /* Banners */
 .banner { background: linear-gradient(135deg, var(--green), #1B5E20); color: #fff; border-radius: var(--radius); padding: 16px; margin-bottom: 12px; box-shadow: var(--shadow); }
@@ -76,6 +78,9 @@ main { max-width: 720px; margin: 0 auto; padding: 12px 14px; }
 .btn.primary { background: var(--red); color: #fff; font-weight: 700; }
 .btn.green { background: var(--green); color: #fff; font-weight: 700; }
 .btn.fb-btn { background: var(--fb-blue); color: #fff; font-weight: 700; }
+.btn.messenger-btn { background: #0084FF; color: #fff; font-weight: 700; }
+.btn.whatsapp-btn { background: #25D366; color: #fff; font-weight: 700; }
+.star-btn { cursor: pointer; color: #ddd; }
 .btn.ghost { background: transparent; color: var(--green); }
 .btn.danger { background: #fff; color: var(--red); border: 1px solid var(--red); }
 .btn.full { width: 100%; display: block; }
@@ -129,6 +134,7 @@ table.data th { background: var(--green-light); }
 
 /* About */
 .about-card { text-align: center; }
+.about-card .btn { margin-top: 8px; }
 .about-logo { width: 140px; height: 140px; border-radius: 50%; object-fit: cover; border: 3px solid var(--red); }
 .mission-list { text-align: left; }
 

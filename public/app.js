@@ -2,6 +2,8 @@
 const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'];
 const DISTRICTS = ['বাগেরহাট','বান্দরবান','বরগুনা','বরিশাল','ভোলা','বগুড়া','ব্রাহ্মণবাড়িয়া','চাঁদপুর','চট্টগ্রাম','চুয়াডাঙ্গা','কক্সবাজার','কুমিল্লা','ঢাকা','দিনাজপুর','ফরিদপুর','ফেনী','গাইবান্ধা','গাজীপুর','গোপালগঞ্জ','হবিগঞ্জ','জামালপুর','যশোর','ঝালকাঠি','ঝিনাইদহ','জয়পুরহাট','খাগড়াছড়ি','খুলনা','কিশোরগঞ্জ','কুড়িগ্রাম','কুষ্টিয়া','লক্ষ্মীপুর','লালমনিরহাট','মাদারীপুর','মাগুরা','মানিকগঞ্জ','মেহেরপুর','মৌলভীবাজার','মুন্সিগঞ্জ','ময়মনসিংহ','নওগাঁ','নড়াইল','নারায়ণগঞ্জ','নরসিংদী','নাটোর','নেত্রকোণা','নীলফামারী','নোয়াখালী','পাবনা','পঞ্চগড়','পটুয়াখালী','পিরোজপুর','রাজবাড়ী','রাজশাহী','রাঙ্গামাটি','রংপুর','সাতক্ষীরা','শরীয়তপুর','শেরপুর','সিরাজগঞ্জ','সুনামগঞ্জ','সিলেট','টাঙ্গাইল','ঠাকুরগাঁও'];
 const FB_GROUP_DEFAULT = 'https://www.facebook.com/share/g/1CYoKfm9sA/';
+const MESSENGER_DEFAULT = 'https://m.me/j/AbZe0t2QfrZ45zqT/?send_source=gc%3Acopy_invite_link_t';
+const WHATSAPP_DEFAULT = 'https://chat.whatsapp.com/Edd6YSYC0keEhyxlqpRvKU?s=cl&p=a&iam=2';
 
 const state = { user: null, token: localStorage.getItem('rs_token') || null, settings: null, requests: [], chatId: null, chatTimer: null, adminTab: 'stats' };
 const $ = (s) => document.querySelector(s);
@@ -26,10 +28,11 @@ async function api(path, opts = {}) {
 }
 
 // ---------------- Navigation ----------------
-const VIEWS = ['home', 'donors', 'request', 'campaigns', 'directory', 'inbox', 'chat', 'profile', 'moderator', 'admin', 'about'];
+const VIEWS = ['home', 'donors', 'request', 'campaigns', 'directory', 'inbox', 'chat', 'profile', 'moderator', 'admin', 'about', 'fund'];
 function showView(name) {
-  if (['request', 'inbox', 'profile', 'moderator', 'admin'].includes(name) && !state.user) { openAuth(); toast('প্রথমে লগইন করুন'); return; }
+  if (['request', 'inbox', 'profile', 'moderator', 'admin', 'fund'].includes(name) && !state.user) { openAuth(); toast('প্রথমে লগইন করুন'); return; }
   if (name === 'admin' && state.user?.role !== 'admin') { toast('শুধু অ্যাডমিনদের জন্য'); return; }
+  if (name === 'fund' && !['moderator', 'admin'].includes(state.user?.role)) { toast('ফান্ড ম্যানেজমেন্ট শুধু অ্যাডমিন ও মডারেটরদের জন্য'); return; }
   if (name === 'moderator' && !['moderator', 'admin'].includes(state.user?.role)) { openModeratorApply(); return; }
   VIEWS.forEach(v => $('#view-' + v)?.classList.toggle('active', v === name));
   $$('.bottom-nav button').forEach(b => b.classList.toggle('active', b.dataset.nav === name));
@@ -43,6 +46,7 @@ function showView(name) {
   if (name === 'profile') loadProfile();
   if (name === 'moderator') loadModerator();
   if (name === 'admin') loadAdmin();
+  if (name === 'fund') loadFund();
 }
 document.addEventListener('click', (e) => {
   const nav = e.target.closest('[data-nav]');
@@ -62,8 +66,14 @@ async function loadSettings() {
     $('#aboutHelpline2').href = 'tel:' + state.settings.helpline2;
     $('#aboutHelpline2').textContent = state.settings.helpline2;
     const fb = state.settings.fb_group_url || FB_GROUP_DEFAULT;
+    const ms = state.settings.messenger_url || MESSENGER_DEFAULT;
+    const wa = state.settings.whatsapp_url || WHATSAPP_DEFAULT;
     $('#fbGroupBtnHome').href = fb;
     $('#fbGroupBtnAbout').href = fb;
+    $('#messengerBtnHome').href = ms;
+    $('#messengerBtnAbout').href = ms;
+    $('#whatsappBtnHome').href = wa;
+    $('#whatsappBtnAbout').href = wa;
   } catch { /* defaults in HTML already point at the real group link */ }
 }
 
@@ -115,12 +125,15 @@ function requestCard(r) {
     <div class="req-meta">${photo}<div><b>${esc(req.name || '—')}</b> ${badges}<br><small>${fmtDateTime(r.created_at)}</small></div>
     ${r.status === 'managed' ? '<span class="badge-managed" style="margin-left:auto">✅ রক্ত ম্যানেজ হয়েছে</span>' : ''}</div>
     <div class="req-format">${esc(r.formatted)}</div>
+    ${r.donor ? `<div class="muted small">🩸 রক্তদাতা: <b>${esc(r.donor.name)}</b></div>` : ''}
     <div class="btn-row">
       <a class="btn green small" href="tel:${esc(r.contact_phone)}">📞 Call Now</a>
       <button class="btn small" onclick="startChat(${r.user_id}, ${r.id})">💬 ইনবক্স</button>
       <button class="btn small" onclick="copyFormat(${r.id})">📋 Copy Format</button>
       <button class="btn small" onclick="shareCard(${r.id})">🖼️ Share Card</button>
       ${r.status !== 'managed' && canManage ? `<button class="btn primary small" onclick="markManaged(${r.id})">✅ রক্ত ম্যানেজ হয়েছে</button>` : ''}
+      ${r.status === 'managed' && me && me.id === r.user_id && r.donor && !r.feedback_given ? `<button class="btn primary small" onclick="openFeedback(${r.id})">⭐ ফিডব্যাক দিন</button>` : ''}
+      ${r.status === 'managed' && r.feedback_given ? '<span class="pill ok">⭐ ফিডব্যাক দেওয়া হয়েছে</span>' : ''}
       ${canMod ? `<button class="btn small" onclick="editRequest(${r.id})">✏️ সম্পাদনা</button><button class="btn danger small" onclick="deleteRequest(${r.id})">🗑️ মুছুন</button>` : ''}
       ${canMod && r.status !== 'managed' ? `<button class="btn small" onclick="urgentNotify(${r.id})">🚨 জরুরি নোটিফিকেশন</button>` : ''}
       <button class="btn ghost small" onclick="reportItem('request', ${r.id})">🚩 রিপোর্ট</button>
@@ -152,10 +165,85 @@ async function copyFormat(id) {
   catch { prompt('নিচের লেখাটি কপি করুন:', r.formatted); }
 }
 
+let donorPickResults = [];
 async function markManaged(id) {
   if (!state.user) { openAuth(); return; }
-  if (!confirm('রক্ত ম্যানেজ হয়ে গেছে — আবেদনটি বন্ধ করবেন?')) return;
-  try { await api(`/api/requests/${id}/manage`, { method: 'POST' }); toast('✅ রক্ত ম্যানেজ হয়েছে'); loadRequests(); } catch (e) { toast(e.message); }
+  openGeneric(`
+    <h3>✅ রক্ত ম্যানেজ হয়েছে</h3>
+    <p class="muted">কে রক্ত দিয়েছেন? ডোনার বেছে নিলে পরে তাকে ফিডব্যাক/রেটিং দিতে পারবেন।</p>
+    <input type="text" id="donorPickSearch" placeholder="ডোনারের নাম বা ফোন নম্বর লিখুন">
+    <button class="btn small" id="donorPickSearchBtn" style="margin:6px 0">🔍 খুঁজুন</button>
+    <div id="donorPickList"></div>
+    <div class="btn-row" style="margin-top:12px">
+      <button class="btn ghost" onclick="confirmManaged(${id}, null)">ডোনার জানা নেই — এড়িয়ে যান</button>
+    </div>`);
+  const search = async () => {
+    const q = $('#donorPickSearch').value.trim();
+    try {
+      const d = await api('/api/donors?' + new URLSearchParams(q ? { q } : {}).toString());
+      donorPickResults = d.donors;
+      $('#donorPickList').innerHTML = d.donors.length ? d.donors.map(x => `
+        <div class="notif-item" style="cursor:pointer" onclick="pickDonorForManage(${id}, ${x.id})">
+          <b>${esc(x.name)}</b> — ${esc(x.blood_group)}${x.district ? ' · ' + esc(x.district) : ''}
+        </div>`).join('') : '<p class="muted">কোনো ডোনার পাওয়া যায়নি</p>';
+    } catch (e) { $('#donorPickList').innerHTML = `<p class="error">${esc(e.message)}</p>`; }
+  };
+  $('#donorPickSearchBtn').onclick = search;
+  $('#donorPickSearch').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); search(); } };
+  search();
+}
+async function pickDonorForManage(reqId, donorId) {
+  const d = donorPickResults.find(x => x.id === donorId);
+  if (!confirm(`${d ? d.name : 'এই ডোনার'} — রক্ত দিয়েছেন, নিশ্চিত?`)) return;
+  await confirmManaged(reqId, donorId);
+}
+async function confirmManaged(id, donorId) {
+  try {
+    await api(`/api/requests/${id}/manage`, { method: 'POST', body: JSON.stringify(donorId ? { donor_id: donorId } : {}) });
+    closeModal('genericModal');
+    toast(donorId ? '✅ রক্ত ম্যানেজ হয়েছে — এখন ডোনারকে ফিডব্যাক দিতে পারবেন' : '✅ রক্ত ম্যানেজ হয়েছে');
+    loadRequests(); loadMyRequests();
+  } catch (e) { toast(e.message); }
+}
+
+// ---------------- Donor feedback ----------------
+let feedbackStars = 5;
+async function openFeedback(reqId) {
+  feedbackStars = 5;
+  openGeneric(`
+    <h3>⭐ ডোনার ফিডব্যাক</h3>
+    <p class="muted">ডোনার কেমন সেবা দিয়েছেন? রেটিং দিন।</p>
+    <div id="starRow" style="font-size:2rem;text-align:center;letter-spacing:4px">
+      ${[1, 2, 3, 4, 5].map(n => `<span class="star-btn" data-star="${n}">★</span>`).join('')}
+    </div>
+    <label>মন্তব্য (ঐচ্ছিক)<textarea id="feedbackComment" rows="3" placeholder="যেমন: সময়মতো এসেছেন, খুব ভালো ব্যবহার"></textarea></label>
+    <button class="btn primary full" onclick="submitFeedback(${reqId})">ফিডব্যাক জমা দিন</button>`);
+  paintStars(5);
+  $$('#starRow .star-btn').forEach(s => s.onclick = () => { feedbackStars = parseInt(s.dataset.star, 10); paintStars(feedbackStars); });
+}
+function paintStars(n) { $$('#starRow .star-btn').forEach(s => { s.style.color = parseInt(s.dataset.star, 10) <= n ? '#F9A825' : '#ddd'; }); }
+async function submitFeedback(reqId) {
+  const comment = $('#feedbackComment').value.trim();
+  try {
+    await api(`/api/requests/${reqId}/feedback`, { method: 'POST', body: JSON.stringify({ rating: feedbackStars, comment }) });
+    closeModal('genericModal'); toast('⭐ ফিডব্যাক দেওয়ার জন্য ধন্যবাদ!');
+    loadRequests(); loadMyRequests();
+  } catch (e) { toast(e.message); }
+}
+async function viewFeedback(donorId) {
+  openGeneric('<p class="muted">লোড হচ্ছে…</p>');
+  try {
+    const d = await api('/api/users/' + donorId);
+    const u = d.user;
+    const stars = (r) => '★'.repeat(r) + '☆'.repeat(5 - r);
+    $('#genericModalContent').innerHTML = `
+      <h3>⭐ ${esc(u.name)} — ফিডব্যাক</h3>
+      <p>গড় রেটিং: <b>${u.avg_rating ?? '—'} / ৫</b> (${u.feedback_count}টি ফিডব্যাক) · 🩸 ${u.donation_count} বার রক্তদান</p>
+      ${u.feedbacks?.length ? u.feedbacks.map(f => `
+        <div class="notif-item"><span style="color:#F9A825">${stars(f.rating)}</span> — ${esc(f.giver_name)}<br>
+        ${f.comment ? esc(f.comment) + '<br>' : ''}<small class="muted">${fmtDateTime(f.created_at)}</small></div>`).join('')
+      : '<p class="muted">এখনো কোনো ফিডব্যাক নেই</p>'}`;
+  } catch (e) { $('#genericModalContent').innerHTML = `<p class="error">${esc(e.message)}</p>`; }
 }
 
 async function deleteRequest(id) {
@@ -385,9 +473,18 @@ function eligibilityPill(d) {
 }
 function donorCard(d) {
   const photo = d.photo ? `<img src="${esc(d.photo)}" class="donor-photo" alt="">` : `<span class="avatar-fallback">👤</span>`;
-  const badges = `${d.verified_donor ? '<span class="badge-verified">✓ Verified Donor</span>' : ''}${d.role === 'moderator' ? '<span class="badge-mod">🛡️ Verified Moderator</span>' : ''}`;
+  const badges = `${d.verified_donor ? '<span class="badge-verified">✓ Verified Donor</span>' : ''}${d.role === 'moderator' ? '<span class="badge-mod">🛡️ Verified Moderator</span>' : ''}${d.role === 'admin' ? '<span class="badge-mod">⚙️ Admin</span>' : ''}`;
   const me = state.user;
   const canVerify = me && (me.role === 'moderator' || me.role === 'admin') && (!me.mod_district || me.mod_district === d.district);
+  // Privacy: admins/moderators' phones are hidden from non-admins (server
+  // returns phone: null) — show a contact note instead of a call button.
+  // In-app messaging stays allowed (it reveals no phone number).
+  const callBtn = d.phone
+    ? `<a class="btn green small" href="tel:${esc(d.phone)}">📞 কল করুন</a>`
+    : `<span class="pill wait">অ্যাডমিনের সাথে যোগাযোগ করুন</span>`;
+  const ratingLine = d.feedback_count
+    ? `<div class="muted small">⭐ <b>${d.avg_rating}</b> / ৫ (${d.feedback_count}টি ফিডব্যাক) <button class="btn ghost small" onclick="viewFeedback(${d.id})">দেখুন</button></div>`
+    : '';
   return `
   <div class="card donor-card">
     ${photo}
@@ -397,8 +494,9 @@ function donorCard(d) {
       ${d.available ? '<span class="pill ok">🟢 Available</span>' : '<span class="pill no">🔴 Unavailable</span>'}
       ${eligibilityPill(d)}
       <div class="muted small">📍 ${esc([d.upazila, d.district].filter(Boolean).join(', ') || '—')}${d.donation_count ? ` · 🩸 ${d.donation_count} বার রক্তদান` : ''}</div>
+      ${ratingLine}
       <div class="btn-row">
-        <a class="btn green small" href="tel:${esc(d.phone)}">📞 কল করুন</a>
+        ${callBtn}
         <button class="btn small" onclick="startChat(${d.id}, null)">💬 মেসেজ</button>
         ${canVerify ? `<button class="btn small" onclick="verifyDonor(${d.id}, ${d.verified_donor ? 'false' : 'true'})">${d.verified_donor ? '✓ যাচাই বাতিল' : '✓ Verify Donor'}</button>` : ''}
         <button class="btn ghost small" onclick="reportItem('user', ${d.id})">🚩 রিপোর্ট</button>
@@ -451,6 +549,7 @@ async function loadProfile() {
       <div class="btn-row" style="justify-content:center">
         ${u.role === 'admin' ? '<button class="btn green" data-nav="admin">⚙️ অ্যাডমিন প্যানেল</button>' : ''}
         ${u.role === 'moderator' ? '<button class="btn green" data-nav="moderator">🛡️ মডারেটর প্যানেল</button>' : ''}
+        ${['admin', 'moderator'].includes(u.role) ? '<button class="btn" data-nav="fund">💰 ফান্ড ম্যানেজমেন্ট</button>' : ''}
         ${u.role === 'user' ? '<button class="btn" onclick="openModeratorApply()">🛡️ মডারেটর হতে আবেদন করুন</button>' : ''}
         <button class="btn" onclick="showCertificate()">🏆 ধন্যবাদ সার্টিফিকেট</button>
         <button class="btn danger" onclick="logout()">🚪 লগআউট</button>
@@ -759,8 +858,151 @@ async function loadModerator() {
       <div class="btn-row">
         <button class="btn primary" data-nav="home">🩸 আবেদন দেখুন</button>
         <button class="btn green" data-nav="donors">🔍 ডোনার খুঁজুন</button>
+        <button class="btn" data-nav="fund">💰 ফান্ড ম্যানেজমেন্ট</button>
       </div>
     </div>`;
+}
+
+// ---------------- Fund management (admin & moderator only) ----------------
+let fundMonth = new Date().toISOString().slice(0, 7);
+let fundMembersCache = [];
+async function loadFund() {
+  const box = $('#fundBox');
+  if (!state.user || !['moderator', 'admin'].includes(state.user.role)) { box.innerHTML = '<p class="muted">ফান্ড ম্যানেজমেন্ট শুধু অ্যাডমিন ও মডারেটরদের জন্য</p>'; return; }
+  box.innerHTML = '<p class="muted">লোড হচ্ছে…</p>';
+  try {
+    const [summary, members, payments] = await Promise.all([
+      api('/api/funds/summary?month=' + fundMonth),
+      api('/api/funds/members'),
+      api('/api/funds/payments?month=' + fundMonth),
+    ]);
+    fundMembersCache = members.members;
+    box.innerHTML = `
+      <div class="card">
+        <label>মাস
+          <input type="month" id="fundMonthInput" value="${fundMonth}" style="max-width:220px">
+        </label>
+        <div class="admin-stats" style="margin-top:10px">
+          <div class="stat"><b>${summary.total_collected} ৳</b><span>এই মাসে সংগ্রহ</span></div>
+          <div class="stat"><b>${summary.total_pending} ৳</b><span>বাকি</span></div>
+          <div class="stat"><b>${summary.paid_count} / ${summary.total_count}</b><span>জমা / মোট এন্ট্রি</span></div>
+          <div class="stat"><b>${summary.total_members}</b><span>মোট ফান্ড সদস্য</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>➕ ফান্ডে পেমেন্ট যোগ করুন</h3>
+        <form id="fundPaymentForm" class="form">
+          <label>সদস্য *
+            <select name="member_id" required>
+              <option value="">বেছে নিন</option>
+              ${members.members.map(m => `<option value="${m.id}">${esc(m.name)} (${esc(m.phone)})</option>`).join('')}
+            </select>
+          </label>
+          <div class="grid-2">
+            <label>মাস *<input type="month" name="month" value="${fundMonth}" required></label>
+            <label>টাকার পরিমাণ (৳) *<input type="number" name="amount" min="1" step="1" required placeholder="যেমন: 500"></label>
+          </div>
+          <div class="grid-2">
+            <label>পেমেন্টের তারিখ<input type="date" name="payment_date" value="${new Date().toISOString().slice(0, 10)}"></label>
+            <label>স্ট্যাটাস
+              <select name="status"><option value="paid">✅ জমা হয়েছে</option><option value="pending">⏳ বাকি</option></select>
+            </label>
+          </div>
+          <div class="grid-2">
+            <label>TrxID (ঐচ্ছিক)<input type="text" name="trxid" placeholder="যেমন: 9HX7..."></label>
+            <label>মাধ্যম
+              <select name="method"><option value="bKash">bKash</option><option value="Nagad">Nagad</option><option value="Cash">নগদ</option><option value="Bank">ব্যাংক</option></select>
+            </label>
+          </div>
+          <button class="btn green full">💰 পেমেন্ট যোগ করুন</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h3>📋 ${fundMonth} মাসের পেমেন্ট</h3>
+        ${payments.payments.length ? `<div style="overflow-x:auto"><table class="data"><tr><th>সদস্য</th><th>টাকা</th><th>তারিখ</th><th>স্ট্যাটাস</th><th>TrxID</th><th>অ্যাকশন</th></tr>
+        ${payments.payments.map(p => `<tr>
+          <td>${esc(p.member_name)}</td><td><b>${p.amount} ৳</b></td><td>${fmtDate(p.payment_date)}</td>
+          <td>${p.status === 'paid' ? '<span class="pill ok">✅ জমা</span>' : '<span class="pill wait">⏳ বাকি</span>'}</td>
+          <td>${esc(p.trxid || '—')}${p.method ? `<br><small class="muted">${esc(p.method)}</small>` : ''}</td>
+          <td>
+            <button class="btn ${p.status === 'paid' ? '' : 'green'} small" onclick="toggleFundPayment(${p.id}, '${p.status === 'paid' ? 'pending' : 'paid'}')">${p.status === 'paid' ? 'বাকি করুন' : 'জমা করুন'}</button>
+            <button class="btn danger small" onclick="deleteFundPayment(${p.id})">🗑️</button>
+          </td></tr>`).join('')}</table></div>` : '<p class="muted">এই মাসে কোনো পেমেন্ট নেই</p>'}
+      </div>
+
+      <div class="card">
+        <h3>👥 ফান্ড সদস্য তালিকা</h3>
+        <form id="fundMemberForm" class="form">
+          <h4>নতুন সদস্য যোগ করুন</h4>
+          <div class="grid-2">
+            <label>নাম *<input name="name" required placeholder="সদস্যের নাম"></label>
+            <label>ফোন নম্বর *<input name="phone" required pattern="01[3-9][0-9]{8}" placeholder="01XXXXXXXXX"></label>
+          </div>
+          <div class="grid-2">
+            <label>bKash নম্বর<input name="bkash" placeholder="01XXXXXXXXX (ঐচ্ছিক)"></label>
+            <label>যোগদানের তারিখ<input type="date" name="joined_date" value="${new Date().toISOString().slice(0, 10)}"></label>
+          </div>
+          <button class="btn primary">➕ সদস্য যোগ করুন</button>
+        </form>
+        <div style="margin-top:14px;overflow-x:auto"><table class="data"><tr><th>নাম</th><th>ফোন / bKash</th><th>যোগদান</th><th>মোট জমা</th><th>বাকি</th><th>অ্যাকশন</th></tr>
+        ${members.members.map(m => `<tr>
+          <td>${esc(m.name)}</td><td>${esc(m.phone)}${m.bkash ? `<br><small class="muted">bKash: ${esc(m.bkash)}</small>` : ''}</td>
+          <td>${fmtDate(m.joined_date)}</td><td><b>${m.total_paid} ৳</b></td><td>${m.total_pending} ৳</td>
+          <td>
+            <button class="btn small" onclick="editFundMember(${m.id})">✏️</button>
+            <button class="btn danger small" onclick="deleteFundMember(${m.id})">🗑️</button>
+          </td></tr>`).join('') || '<tr><td colspan="6" class="muted">কোনো সদস্য নেই</td></tr>'}</table></div>
+      </div>`;
+    $('#fundMonthInput').onchange = (e) => { fundMonth = e.target.value || fundMonth; loadFund(); };
+    $('#fundMemberForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const body = Object.fromEntries(new FormData(e.target).entries());
+      try { await api('/api/funds/members', { method: 'POST', body: JSON.stringify(body) }); toast('সদস্য যোগ হয়েছে'); loadFund(); }
+      catch (err) { toast(err.message); }
+    };
+    $('#fundPaymentForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const body = Object.fromEntries(new FormData(e.target).entries());
+      try {
+        await api('/api/funds/payments', { method: 'POST', body: JSON.stringify(body) });
+        fundMonth = body.month; toast('পেমেন্ট যোগ হয়েছে'); loadFund();
+      } catch (err) { toast(err.message); }
+    };
+  } catch (e) { box.innerHTML = `<p class="error">${esc(e.message)}</p>`; }
+}
+async function toggleFundPayment(id, status) {
+  try { await api(`/api/funds/payments/${id}`, { method: 'PUT', body: JSON.stringify({ status }) }); loadFund(); }
+  catch (e) { toast(e.message); }
+}
+async function deleteFundPayment(id) {
+  if (!confirm('এই পেমেন্ট মুছবেন?')) return;
+  try { await api(`/api/funds/payments/${id}`, { method: 'DELETE' }); loadFund(); } catch (e) { toast(e.message); }
+}
+async function deleteFundMember(id) {
+  if (!confirm('এই সদস্য ও তার সব পেমেন্ট রেকর্ড মুছে যাবে। নিশ্চিত?')) return;
+  try { await api(`/api/funds/members/${id}`, { method: 'DELETE' }); toast('সদস্য মুছে ফেলা হয়েছে'); loadFund(); } catch (e) { toast(e.message); }
+}
+function editFundMember(id) {
+  const m = fundMembersCache.find(x => x.id === id);
+  if (!m) return;
+  openGeneric(`
+    <h3>✏️ সদস্য সম্পাদনা</h3>
+    <form id="editFundMemberForm" class="form">
+      <label>নাম<input name="name" value="${esc(m.name)}" required></label>
+      <label>ফোন নম্বর<input name="phone" value="${esc(m.phone)}" required></label>
+      <label>bKash নম্বর<input name="bkash" value="${esc(m.bkash || '')}"></label>
+      <label>যোগদানের তারিখ<input type="date" name="joined_date" value="${m.joined_date ? String(m.joined_date).slice(0, 10) : ''}"></label>
+      <label>নোট<input name="note" value="${esc(m.note || '')}"></label>
+      <button class="btn primary full">সংরক্ষণ করুন</button>
+    </form>`);
+  $('#editFundMemberForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const body = Object.fromEntries(new FormData(e.target).entries());
+    try { await api(`/api/funds/members/${id}`, { method: 'PUT', body: JSON.stringify(body) }); closeModal('genericModal'); toast('সদস্য আপডেট হয়েছে'); loadFund(); }
+    catch (err) { toast(err.message); }
+  };
 }
 
 // ---------------- Admin ----------------
@@ -882,6 +1124,8 @@ async function loadAdmin() {
           <label>হেল্পলাইন ১<input name="helpline1" value="${esc(s.helpline1)}"></label>
           <label>হেল্পলাইন ২<input name="helpline2" value="${esc(s.helpline2)}"></label>
           <label>ফেসবুক গ্রুপ লিংক<input name="fb_group_url" value="${esc(s.fb_group_url)}"></label>
+          <label>মেসেঞ্জার গ্রুপ লিংক<input name="messenger_url" value="${esc(s.messenger_url || MESSENGER_DEFAULT)}"></label>
+          <label>হোয়াটসঅ্যাপ গ্রুপ লিংক<input name="whatsapp_url" value="${esc(s.whatsapp_url || WHATSAPP_DEFAULT)}"></label>
           <button class="btn primary">সংরক্ষণ করুন</button>
         </form>`;
       $('#settingsForm').onsubmit = async (e) => { e.preventDefault(); const body = Object.fromEntries(new FormData(e.target).entries()); await api('/api/admin/settings', { method: 'PUT', body: JSON.stringify(body) }); toast('সেটিংস সংরক্ষিত'); await loadSettings(); };
