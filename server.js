@@ -32,6 +32,8 @@ const REG_TOKEN_TTL_MIN = 30;
 
 const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'];
 const FB_GROUP_URL_DEFAULT = 'https://www.facebook.com/share/g/1CYoKfm9sA/';
+const MESSENGER_URL_DEFAULT = 'https://m.me/j/AbZe0t2QfrZ45zqT/?send_source=gc%3Acopy_invite_link_t';
+const WHATSAPP_URL_DEFAULT = 'https://chat.whatsapp.com/Edd6YSYC0keEhyxlqpRvKU?s=cl&p=a&iam=2';
 const HELPLINE1_DEFAULT = '09638877444';
 const HELPLINE2_DEFAULT = '01966689599';
 
@@ -130,6 +132,7 @@ const SCHEMA = [
   contact_phone TEXT NOT NULL,
   reference TEXT,
   status TEXT NOT NULL DEFAULT 'open',
+  donor_id INTEGER REFERENCES users(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )`,
 `CREATE TABLE IF NOT EXISTS conversations (
@@ -225,15 +228,61 @@ const SCHEMA = [
   detail TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )`,
+`CREATE TABLE IF NOT EXISTS fund_members (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  bkash TEXT,
+  joined_date DATE,
+  note TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)`,
+`CREATE TABLE IF NOT EXISTS fund_payments (
+  id SERIAL PRIMARY KEY,
+  member_id INTEGER NOT NULL REFERENCES fund_members(id),
+  month TEXT NOT NULL,
+  amount NUMERIC NOT NULL,
+  payment_date DATE,
+  status TEXT NOT NULL DEFAULT 'pending',
+  trxid TEXT,
+  method TEXT,
+  note TEXT,
+  recorded_by INTEGER REFERENCES users(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)`,
+`CREATE TABLE IF NOT EXISTS feedbacks (
+  id SERIAL PRIMARY KEY,
+  request_id INTEGER NOT NULL REFERENCES requests(id),
+  donor_id INTEGER NOT NULL REFERENCES users(id),
+  giver_id INTEGER NOT NULL REFERENCES users(id),
+  rating INTEGER NOT NULL,
+  comment TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (request_id, donor_id, giver_id)
+)`,
+];
+
+// Backward-compatible migrations for DBs created before v1.1
+// (production Neon already has these tables without the new column).
+// CREATE TABLE IF NOT EXISTS above covers fresh installs; these cover
+// existing ones. Each runs in try/catch so a quirk never blocks boot.
+const MIGRATIONS = [
+  `ALTER TABLE requests ADD COLUMN IF NOT EXISTS donor_id INTEGER REFERENCES users(id)`,
 ];
 
 async function initDb() {
   for (const stmt of SCHEMA) await q(stmt);
+  for (const stmt of MIGRATIONS) {
+    try { await q(stmt); } catch (e) { console.error('migration (non-fatal):', e.message); }
+  }
   // Default settings (only if not already set)
   const defaults = [
     ['helpline1', HELPLINE1_DEFAULT],
     ['helpline2', HELPLINE2_DEFAULT],
     ['fb_group_url', FB_GROUP_URL_DEFAULT],
+    ['messenger_url', MESSENGER_URL_DEFAULT],
+    ['whatsapp_url', WHATSAPP_URL_DEFAULT],
   ];
   for (const [key, value] of defaults) {
     const r = await q('SELECT key FROM settings WHERE key = $1', [key]);
@@ -291,18 +340,36 @@ function donorEligibility(user) {
   return { eligible, reason: eligible ? 'ok' : 'waiting', eligibleDate: eligibleDate.toISOString().slice(0, 10), age };
 }
 
-// Public donor shape: hides phone-hidden users' photos, never leaks KYC.
-function publicUser(u) {
+// Public user shape — PRIVACY RULE (v1.1):
+// An admin's or moderator's phone number and age are visible ONLY to the
+// Super Admin (role 'admin') and to the user themself. Everyone else
+// (general members, other moderators, anonymous visitors) gets null.
+// General members' phones stay visible — calling donors is the core
+// function of the app. date_of_birth is never in this shape at all;
+// only /api/me (self) and /api/admin/users (super admin) return dob.
+// EVERY endpoint that returns user data must use this helper.
+function serializeUser(u, viewer) {
   const el = donorEligibility(u);
+  const isStaff = u.role === 'admin' || u.role === 'moderator';
+  const viewerIsAdmin = !!(viewer && viewer.role === 'admin');
+  const isSelf = !!(viewer && viewer.id === u.id);
+  const hidePrivate = isStaff && !viewerIsAdmin && !isSelf;
   return {
-    id: u.id, name: u.name, phone: u.phone, blood_group: u.blood_group,
+    id: u.id, name: u.name,
+    phone: hidePrivate ? null : u.phone,
+    blood_group: u.blood_group,
     district: u.district, upazila: u.upazila, gender: u.gender,
     available: u.available, verified_donor: u.verified_donor, role: u.role,
     photo: u.photo_hidden ? null : (u.photo || null),
     photo_hidden: !!u.photo_hidden,
-    age: el.age, eligible: el.eligible, eligibility_reason: el.reason,
+    age: hidePrivate ? null : el.age,
+    eligible: el.eligible,
+    // 'under18' would reveal age, so mask it for hidden staff profiles
+    eligibility_reason: (hidePrivate && el.reason === 'under18') ? 'waiting' : el.reason,
     eligible_date: el.eligibleDate, last_donation: u.last_donation,
     mod_district: u.mod_district, created_at: u.created_at,
+    avg_rating: (u.avg_rating === null || u.avg_rating === undefined) ? null : Math.round(parseFloat(u.avg_rating) * 10) / 10,
+    feedback_count: u.feedback_count ? parseInt(u.feedback_count, 10) : 0,
   };
 }
 
@@ -369,6 +436,21 @@ async function auth(req, res, next) {
   const user = s.rows[0];
   if (user.banned) return res.status(403).json({ error: 'এই অ্যাকাউন্টটি ব্যান করা হয়েছে' });
   req.user = user;
+  next();
+}
+// Optional auth: loads req.user when a valid token is sent, otherwise
+// leaves req.user null (anonymous). Used by public endpoints that
+// serialize user data differently for admins (privacy rules).
+async function optionalAuth(req, res, next) {
+  req.user = null;
+  const h = req.headers.authorization || '';
+  const token = h.startsWith('Bearer ') ? h.slice(7) : null;
+  if (token) {
+    try {
+      const s = await q('SELECT s.*, u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = $1 AND s.expires_at > NOW()', [token]);
+      if (s.rows.length && !s.rows[0].banned) req.user = s.rows[0];
+    } catch (e) { /* invalid/expired token -> anonymous */ }
+  }
   next();
 }
 function requireRole(...roles) {
@@ -442,7 +524,7 @@ app.post('/api/auth/verify-otp', async (req, res) => {
     if (u.rows.length) {
       if (u.rows[0].banned) return res.status(403).json({ error: 'এই অ্যাকাউন্টটি ব্যান করা হয়েছে' });
       const token = await createSession(u.rows[0].id);
-      return res.json({ ok: true, isNew: false, token, user: publicUser(u.rows[0]) });
+      return res.json({ ok: true, isNew: false, token, user: serializeUser(u.rows[0], u.rows[0]) });
     }
     // New number: issue a short-lived registration token
     const regToken = randomToken();
@@ -476,7 +558,7 @@ app.post('/api/auth/register', async (req, res) => {
     await q('UPDATE reg_tokens SET used = TRUE WHERE token = $1', [reg_token]);
     const token = await createSession(r.rows[0].id);
     await audit(r.rows[0].id, 'register', role === 'admin' ? 'first user -> super admin' : 'new user');
-    res.json({ ok: true, token, user: publicUser(r.rows[0]), isAdmin: role === 'admin' });
+    res.json({ ok: true, token, user: serializeUser(r.rows[0], r.rows[0]), isAdmin: role === 'admin' });
   } catch (e) { console.error(e); res.status(500).json({ error: 'সার্ভার সমস্যা' }); }
 });
 
@@ -489,7 +571,7 @@ app.post('/api/auth/logout', auth, async (req, res) => {
 // ---------------- Me / profile ----------------
 app.get('/api/me', auth, async (req, res) => {
   const d = await q('SELECT COUNT(*) AS c FROM donations WHERE user_id = $1', [req.user.id]);
-  const u = publicUser(req.user);
+  const u = serializeUser(req.user, req.user);
   u.donation_count = parseInt(d.rows[0].c, 10);
   u.dob = req.user.dob;
   res.json({ user: u });
@@ -515,7 +597,7 @@ app.put('/api/me', auth, async (req, res) => {
        photo !== undefined ? (photo || null) : u.photo,
        photo_hidden !== undefined ? !!photo_hidden : u.photo_hidden, u.id]
     );
-    res.json({ ok: true, user: publicUser(r.rows[0]) });
+    res.json({ ok: true, user: serializeUser(r.rows[0], req.user) });
   } catch (e) { console.error(e); res.status(500).json({ error: 'সার্ভার সমস্যা' }); }
 });
 
@@ -525,6 +607,8 @@ app.get('/api/settings', async (req, res) => {
     helpline1: (await getSetting('helpline1')) || HELPLINE1_DEFAULT,
     helpline2: (await getSetting('helpline2')) || HELPLINE2_DEFAULT,
     fb_group_url: (await getSetting('fb_group_url')) || FB_GROUP_URL_DEFAULT,
+    messenger_url: (await getSetting('messenger_url')) || MESSENGER_URL_DEFAULT,
+    whatsapp_url: (await getSetting('whatsapp_url')) || WHATSAPP_URL_DEFAULT,
     dev_otp: DEV_OTP,
   });
 });
@@ -590,13 +674,24 @@ function formatRequest(r) {
   return lines.join('\n');
 }
 
-async function requestWithUser(row) {
+async function requestWithUser(row, viewerId) {
   const u = await q('SELECT id, name, photo, photo_hidden, role, verified_donor FROM users WHERE id = $1', [row.user_id]);
   const user = u.rows[0] || {};
-  return { ...row, formatted: formatRequest(row), requester: { id: user.id, name: user.name, photo: user.photo_hidden ? null : user.photo, role: user.role, verified_donor: user.verified_donor } };
+  const out = { ...row, formatted: formatRequest(row), requester: { id: user.id, name: user.name, photo: user.photo_hidden ? null : user.photo, role: user.role, verified_donor: user.verified_donor } };
+  out.donor = null;
+  if (row.donor_id) {
+    const d = await q('SELECT id, name FROM users WHERE id = $1', [row.donor_id]);
+    out.donor = d.rows[0] || { id: row.donor_id, name: '—' };
+  }
+  out.feedback_given = false;
+  if (viewerId && row.status === 'managed' && row.donor_id && row.user_id === viewerId) {
+    const f = await q('SELECT id FROM feedbacks WHERE request_id = $1 AND giver_id = $2 LIMIT 1', [row.id, viewerId]);
+    out.feedback_given = f.rows.length > 0;
+  }
+  return out;
 }
 
-app.get('/api/requests', async (req, res) => {
+app.get('/api/requests', optionalAuth, async (req, res) => {
   const { blood_group, district, status } = req.query;
   const params = []; const where = [];
   if (blood_group) { params.push(blood_group); where.push(`blood_group = $${params.length}`); }
@@ -607,14 +702,14 @@ app.get('/api/requests', async (req, res) => {
   sql += ' ORDER BY id DESC LIMIT 100';
   const r = await q(sql, params);
   const out = [];
-  for (const row of r.rows) out.push(await requestWithUser(row));
+  for (const row of r.rows) out.push(await requestWithUser(row, req.user ? req.user.id : null));
   res.json({ requests: out });
 });
 
-app.get('/api/requests/:id', async (req, res) => {
+app.get('/api/requests/:id', optionalAuth, async (req, res) => {
   const r = await q('SELECT * FROM requests WHERE id = $1', [req.params.id]);
   if (!r.rows.length) return res.status(404).json({ error: 'রিকোয়েস্ট পাওয়া যায়নি' });
-  res.json({ request: await requestWithUser(r.rows[0]) });
+  res.json({ request: await requestWithUser(r.rows[0], req.user ? req.user.id : null) });
 });
 
 app.post('/api/requests', auth, async (req, res) => {
@@ -641,7 +736,7 @@ app.post('/api/requests', auth, async (req, res) => {
 app.get('/api/my-requests', auth, async (req, res) => {
   const r = await q('SELECT * FROM requests WHERE user_id = $1 ORDER BY id DESC', [req.user.id]);
   const out = [];
-  for (const row of r.rows) out.push(await requestWithUser(row));
+  for (const row of r.rows) out.push(await requestWithUser(row, req.user.id));
   res.json({ requests: out });
 });
 
@@ -671,8 +766,41 @@ app.post('/api/requests/:id/manage', auth, async (req, res) => {
   const row = r.rows[0];
   const isMod = req.user.role === 'moderator' || req.user.role === 'admin';
   if (row.user_id !== req.user.id && !isMod) return res.status(403).json({ error: 'অনুমতি নেই' });
-  const updated = await q("UPDATE requests SET status = 'managed' WHERE id = $1 RETURNING *", [req.params.id]);
-  res.json({ ok: true, request: await requestWithUser(updated.rows[0]) });
+  // Optional: record which donor donated, so the requester can leave feedback
+  let donorId = null;
+  if (req.body.donor_id !== undefined && req.body.donor_id !== null && req.body.donor_id !== '') {
+    donorId = parseInt(req.body.donor_id, 10);
+    if (!donorId) return res.status(400).json({ error: 'সঠিক ডোনার বেছে নিন' });
+    const d = await q('SELECT id FROM users WHERE id = $1 AND banned = FALSE', [donorId]);
+    if (!d.rows.length) return res.status(404).json({ error: 'ডোনার পাওয়া যায়নি' });
+  }
+  const updated = await q("UPDATE requests SET status = 'managed', donor_id = $2 WHERE id = $1 RETURNING *", [req.params.id, donorId]);
+  res.json({ ok: true, request: await requestWithUser(updated.rows[0], req.user.id) });
+});
+
+// Donor feedback — only the requester of a MANAGED request can rate
+// the donor who was recorded when the request was marked managed.
+// One feedback per donor per request.
+app.post('/api/requests/:id/feedback', auth, async (req, res) => {
+  try {
+    const rating = parseInt(req.body.rating, 10);
+    const comment = req.body.comment ? String(req.body.comment).trim().slice(0, 1000) : null;
+    if (!rating || rating < 1 || rating > 5) return res.status(400).json({ error: '১ থেকে ৫ তারার মধ্যে রেটিং দিন' });
+    const r = await q('SELECT * FROM requests WHERE id = $1', [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'রিকোয়েস্ট পাওয়া যায়নি' });
+    const row = r.rows[0];
+    if (row.user_id !== req.user.id) return res.status(403).json({ error: 'শুধু আবেদনকারীই ফিডব্যাক দিতে পারেন' });
+    if (row.status !== 'managed') return res.status(400).json({ error: 'রক্ত ম্যানেজ হওয়ার পরই ফিডব্যাক দেওয়া যাবে' });
+    if (!row.donor_id) return res.status(400).json({ error: 'এই আবেদনে কোনো ডোনার নির্বাচন করা হয়নি' });
+    const exists = await q('SELECT id FROM feedbacks WHERE request_id = $1 AND giver_id = $2', [req.params.id, req.user.id]);
+    if (exists.rows.length) return res.status(400).json({ error: 'এই আবেদনের জন্য ইতিমধ্যে ফিডব্যাক দেওয়া হয়েছে' });
+    const f = await q('INSERT INTO feedbacks (request_id, donor_id, giver_id, rating, comment) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      [req.params.id, row.donor_id, req.user.id, rating, comment]);
+    res.json({ ok: true, feedback: f.rows[0] });
+  } catch (e) {
+    if (String(e.message || '').includes('duplicate') || String(e.code || '') === '23505') return res.status(400).json({ error: 'এই আবেদনের জন্য ইতিমধ্যে ফিডব্যাক দেওয়া হয়েছে' });
+    console.error(e); res.status(500).json({ error: 'সার্ভার সমস্যা' });
+  }
 });
 
 app.delete('/api/requests/:id', auth, requireModOrAdmin, async (req, res) => {
@@ -683,23 +811,34 @@ app.delete('/api/requests/:id', auth, requireModOrAdmin, async (req, res) => {
 });
 
 // ---------------- Donor search ----------------
-app.get('/api/donors', async (req, res) => {
+app.get('/api/donors', optionalAuth, async (req, res) => {
   const { blood_group, district, upazila, q: search } = req.query;
   const params = []; const where = ['banned = FALSE'];
   if (blood_group) { params.push(blood_group); where.push(`blood_group = $${params.length}`); }
   if (district) { params.push(district); where.push(`district = $${params.length}`); }
   if (upazila) { params.push(upazila); where.push(`upazila = $${params.length}`); }
-  if (search) { params.push('%' + String(search).toLowerCase() + '%'); where.push(`LOWER(name) LIKE $${params.length}`); }
+  if (search) { params.push('%' + String(search).toLowerCase() + '%'); where.push(`(LOWER(name) LIKE $${params.length} OR phone LIKE $${params.length})`); }
   const r = await q(`SELECT * FROM users WHERE ${where.join(' AND ')} ORDER BY available DESC, verified_donor DESC, id DESC LIMIT 200`, params);
-  res.json({ donors: r.rows.map(publicUser) });
+  const fbAgg = await q('SELECT donor_id, AVG(rating) AS avg_rating, COUNT(*) AS feedback_count FROM feedbacks GROUP BY donor_id');
+  const fbMap = new Map(fbAgg.rows.map(x => [x.donor_id, x]));
+  const donors = r.rows.map(row => {
+    const agg = fbMap.get(row.id);
+    if (agg) { row.avg_rating = agg.avg_rating; row.feedback_count = agg.feedback_count; }
+    return serializeUser(row, req.user);
+  });
+  res.json({ donors });
 });
 
-app.get('/api/users/:id', async (req, res) => {
+app.get('/api/users/:id', optionalAuth, async (req, res) => {
   const r = await q('SELECT * FROM users WHERE id = $1 AND banned = FALSE', [req.params.id]);
   if (!r.rows.length) return res.status(404).json({ error: 'ব্যবহারকারী পাওয়া যায়নি' });
   const d = await q('SELECT COUNT(*) AS c FROM donations WHERE user_id = $1', [req.params.id]);
-  const u = publicUser(r.rows[0]);
+  const fb = await q('SELECT f.rating, f.comment, f.created_at, f.request_id, u.name AS giver_name FROM feedbacks f JOIN users u ON u.id = f.giver_id WHERE f.donor_id = $1 ORDER BY f.id DESC', [req.params.id]);
+  const u = serializeUser(r.rows[0], req.user);
   u.donation_count = parseInt(d.rows[0].c, 10);
+  u.feedback_count = fb.rows.length;
+  u.avg_rating = fb.rows.length ? Math.round((fb.rows.reduce((s, x) => s + parseInt(x.rating, 10), 0) / fb.rows.length) * 10) / 10 : null;
+  u.feedbacks = fb.rows;
   res.json({ user: u });
 });
 
@@ -875,6 +1014,159 @@ app.delete('/api/donations/:id', auth, async (req, res) => {
 });
 
 // ============================================================
+// FUND MANAGEMENT — admin & moderator ONLY (server-enforced:
+// every endpoint returns 403 for role=user; the UI also hides
+// the menu from general users). bKash numbers live in Neon
+// Postgres (encrypted at rest by Neon) and are only ever returned
+// to admin/moderator sessions — access-controlled, not
+// end-to-end encrypted (see README.md).
+// ============================================================
+function isValidMonth(m) { return /^\d{4}-(0[1-9]|1[0-2])$/.test(m || ''); }
+
+app.get('/api/funds/members', auth, requireModOrAdmin, async (req, res) => {
+  const r = await q('SELECT * FROM fund_members ORDER BY name ASC');
+  const agg = await q(`SELECT member_id,
+      SUM(CASE WHEN status = 'paid' THEN amount ELSE 0 END) AS total_paid,
+      SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END) AS total_pending,
+      COUNT(*) AS payment_count FROM fund_payments GROUP BY member_id`);
+  const map = new Map(agg.rows.map(x => [x.member_id, x]));
+  res.json({ members: r.rows.map(m => {
+    const a = map.get(m.id);
+    return { ...m,
+      total_paid: a ? parseFloat(a.total_paid || 0) : 0,
+      total_pending: a ? parseFloat(a.total_pending || 0) : 0,
+      payment_count: a ? parseInt(a.payment_count, 10) : 0 };
+  }) });
+});
+
+app.post('/api/funds/members', auth, requireModOrAdmin, async (req, res) => {
+  try {
+    const { name, phone, bkash, joined_date, note } = req.body;
+    if (!name || !String(name).trim()) return res.status(400).json({ error: 'নাম দিন' });
+    if (!isValidBdPhone(phone)) return res.status(400).json({ error: 'সঠিক ১১ সংখ্যার মোবাইল নম্বর দিন' });
+    if (bkash && !isValidBdPhone(bkash)) return res.status(400).json({ error: 'সঠিক bKash নম্বর দিন' });
+    if (joined_date && isNaN(new Date(joined_date))) return res.status(400).json({ error: 'সঠিক তারিখ দিন' });
+    const r = await q('INSERT INTO fund_members (name, phone, bkash, joined_date, note, created_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [String(name).trim(), phone, bkash || null, joined_date || new Date().toISOString().slice(0, 10), note || null, req.user.id]);
+    await audit(req.user.id, 'fund-add-member', `#${r.rows[0].id} ${String(name).trim()}`);
+    res.json({ ok: true, member: r.rows[0] });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'সার্ভার সমস্যা' }); }
+});
+
+app.put('/api/funds/members/:id', auth, requireModOrAdmin, async (req, res) => {
+  try {
+    const { name, phone, bkash, joined_date, note } = req.body;
+    if (name !== undefined && !String(name).trim()) return res.status(400).json({ error: 'নাম খালি রাখা যাবে না' });
+    if (phone !== undefined && !isValidBdPhone(phone)) return res.status(400).json({ error: 'সঠিক ১১ সংখ্যার মোবাইল নম্বর দিন' });
+    if (bkash !== undefined && bkash && !isValidBdPhone(bkash)) return res.status(400).json({ error: 'সঠিক bKash নম্বর দিন' });
+    const cur = await q('SELECT * FROM fund_members WHERE id = $1', [req.params.id]);
+    if (!cur.rows.length) return res.status(404).json({ error: 'সদস্য পাওয়া যায়নি' });
+    const m = cur.rows[0];
+    const r = await q('UPDATE fund_members SET name = $1, phone = $2, bkash = $3, joined_date = $4, note = $5 WHERE id = $6 RETURNING *',
+      [name !== undefined ? String(name).trim() : m.name, phone !== undefined ? phone : m.phone,
+       bkash !== undefined ? (bkash || null) : m.bkash, joined_date !== undefined ? (joined_date || null) : m.joined_date,
+       note !== undefined ? (note || null) : m.note, req.params.id]);
+    res.json({ ok: true, member: r.rows[0] });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'সার্ভার সমস্যা' }); }
+});
+
+app.delete('/api/funds/members/:id', auth, requireModOrAdmin, async (req, res) => {
+  await q('DELETE FROM fund_payments WHERE member_id = $1', [req.params.id]);
+  const r = await q('DELETE FROM fund_members WHERE id = $1 RETURNING id', [req.params.id]);
+  if (!r.rows.length) return res.status(404).json({ error: 'সদস্য পাওয়া যায়নি' });
+  await audit(req.user.id, 'fund-delete-member', 'member #' + req.params.id);
+  res.json({ ok: true });
+});
+
+app.get('/api/funds/payments', auth, requireModOrAdmin, async (req, res) => {
+  const { month, member_id } = req.query;
+  const params = []; const where = [];
+  if (month) {
+    if (!isValidMonth(month)) return res.status(400).json({ error: 'সঠিক মাস দিন (YYYY-MM)' });
+    params.push(month); where.push(`p.month = $${params.length}`);
+  }
+  if (member_id) { params.push(parseInt(member_id, 10)); where.push(`p.member_id = $${params.length}`); }
+  let sql = 'SELECT p.*, m.name AS member_name, m.phone AS member_phone FROM fund_payments p JOIN fund_members m ON m.id = p.member_id';
+  if (where.length) sql += ' WHERE ' + where.join(' AND ');
+  sql += ' ORDER BY p.month DESC, p.id DESC LIMIT 500';
+  const r = await q(sql, params);
+  res.json({ payments: r.rows.map(p => ({ ...p, amount: parseFloat(p.amount) })) });
+});
+
+app.post('/api/funds/payments', auth, requireModOrAdmin, async (req, res) => {
+  try {
+    const { member_id, month, amount, payment_date, status, trxid, method, note } = req.body;
+    const mid = parseInt(member_id, 10);
+    if (!mid) return res.status(400).json({ error: 'সদস্য বেছে নিন' });
+    const m = await q('SELECT id FROM fund_members WHERE id = $1', [mid]);
+    if (!m.rows.length) return res.status(404).json({ error: 'সদস্য পাওয়া যায়নি' });
+    if (!isValidMonth(month)) return res.status(400).json({ error: 'সঠিক মাস দিন (YYYY-MM)' });
+    const amt = parseFloat(amount);
+    if (!amt || amt <= 0) return res.status(400).json({ error: 'সঠিক টাকার পরিমাণ দিন' });
+    if (status && !['paid', 'pending'].includes(status)) return res.status(400).json({ error: 'ভুল স্ট্যাটাস' });
+    if (payment_date && isNaN(new Date(payment_date))) return res.status(400).json({ error: 'সঠিক তারিখ দিন' });
+    const r = await q('INSERT INTO fund_payments (member_id, month, amount, payment_date, status, trxid, method, note, recorded_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
+      [mid, month, amt, payment_date || null, status || 'pending', trxid || null, method || null, note || null, req.user.id]);
+    res.json({ ok: true, payment: { ...r.rows[0], amount: parseFloat(r.rows[0].amount) } });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'সার্ভার সমস্যা' }); }
+});
+
+app.put('/api/funds/payments/:id', auth, requireModOrAdmin, async (req, res) => {
+  try {
+    const fields = ['month', 'amount', 'payment_date', 'status', 'trxid', 'method', 'note'];
+    const sets = []; const params = [];
+    for (const f of fields) {
+      if (req.body[f] === undefined) continue;
+      if (f === 'month' && !isValidMonth(req.body[f])) return res.status(400).json({ error: 'সঠিক মাস দিন (YYYY-MM)' });
+      if (f === 'status' && !['paid', 'pending'].includes(req.body[f])) return res.status(400).json({ error: 'ভুল স্ট্যাটাস' });
+      if (f === 'amount') {
+        const a = parseFloat(req.body[f]);
+        if (!a || a <= 0) return res.status(400).json({ error: 'সঠিক টাকার পরিমাণ দিন' });
+        params.push(a);
+      } else {
+        params.push(req.body[f] === '' ? null : req.body[f]);
+      }
+      sets.push(`${f} = $${params.length}`);
+    }
+    if (!sets.length) return res.status(400).json({ error: 'পরিবর্তনের কিছু নেই' });
+    params.push(req.params.id);
+    const r = await q(`UPDATE fund_payments SET ${sets.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
+    if (!r.rows.length) return res.status(404).json({ error: 'পেমেন্ট পাওয়া যায়নি' });
+    res.json({ ok: true, payment: { ...r.rows[0], amount: parseFloat(r.rows[0].amount) } });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'সার্ভার সমস্যা' }); }
+});
+
+app.delete('/api/funds/payments/:id', auth, requireModOrAdmin, async (req, res) => {
+  const r = await q('DELETE FROM fund_payments WHERE id = $1 RETURNING id', [req.params.id]);
+  if (!r.rows.length) return res.status(404).json({ error: 'পেমেন্ট পাওয়া যায়নি' });
+  res.json({ ok: true });
+});
+
+app.get('/api/funds/summary', auth, requireModOrAdmin, async (req, res) => {
+  const month = req.query.month && isValidMonth(req.query.month) ? req.query.month : new Date().toISOString().slice(0, 7);
+  const s = await q(
+    `SELECT COUNT(*) AS total_count,
+      SUM(CASE WHEN status = 'paid' THEN 1 ELSE 0 END) AS paid_count,
+      SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_count,
+      COALESCE(SUM(CASE WHEN status = 'paid' THEN amount ELSE 0 END), 0) AS total_collected,
+      COALESCE(SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END), 0) AS total_pending
+     FROM fund_payments WHERE month = $1`, [month]);
+  const months = await q('SELECT DISTINCT month FROM fund_payments ORDER BY month DESC');
+  const members = await q('SELECT COUNT(*) AS c FROM fund_members');
+  const row = s.rows[0];
+  res.json({
+    month,
+    total_count: parseInt(row.total_count, 10),
+    paid_count: parseInt(row.paid_count || 0, 10),
+    pending_count: parseInt(row.pending_count || 0, 10),
+    total_collected: parseFloat(row.total_collected || 0),
+    total_pending: parseFloat(row.total_pending || 0),
+    total_members: parseInt(members.rows[0].c, 10),
+    months: months.rows.map(r => r.month),
+  });
+});
+
+// ============================================================
 // SUPER ADMIN PANEL
 // ============================================================
 app.get('/api/admin/stats', auth, requireAdmin, async (req, res) => {
@@ -1040,14 +1332,14 @@ app.delete('/api/admin/directory/:id', auth, requireAdmin, async (req, res) => {
   res.json({ ok: true });
 });
 
-// Settings (helplines + Facebook group link)
+// Settings (helplines + social group links)
 app.put('/api/admin/settings', auth, requireAdmin, async (req, res) => {
-  const allowed = ['helpline1', 'helpline2', 'fb_group_url'];
+  const allowed = ['helpline1', 'helpline2', 'fb_group_url', 'messenger_url', 'whatsapp_url'];
   for (const key of allowed) {
     if (req.body[key] !== undefined) {
       const v = String(req.body[key]).trim();
       if (key.startsWith('helpline') && v && !/^[0-9+\- ]{7,15}$/.test(v)) return res.status(400).json({ error: 'সঠিক হেল্পলাইন নম্বর দিন' });
-      if (key === 'fb_group_url' && v && !/^https?:\/\//.test(v)) return res.status(400).json({ error: 'সঠিক ফেসবুক গ্রুপ লিংক দিন (https://...)' });
+      if ((key === 'fb_group_url' || key === 'messenger_url' || key === 'whatsapp_url') && v && !/^https?:\/\//.test(v)) return res.status(400).json({ error: 'সঠিক লিংক দিন (https://...)' });
       await setSetting(key, v);
     }
   }
