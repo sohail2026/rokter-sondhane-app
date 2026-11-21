@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>রক্তের সন্ধানে আমরা বাংলাদেশ</title>
+<link rel="icon" href="/logo.jpg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Noto+Sans+Bengali:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="app-header">
+  <div class="header-inner">
+    <img src="/logo.jpg" alt="লোগো" class="logo">
+    <div class="header-text">
+      <h1>রক্তের সন্ধানে আমরা বাংলাদেশ</h1>
+      <p class="slogan">রক্ত হোক অন্যের জীবন, রক্তই হোক আত্মার বাঁধন</p>
+    </div>
+    <div class="header-actions">
+      <button id="bellBtn" class="icon-btn" title="নোটিফিকেশন" aria-label="নোটিফিকেশন">🔔<span id="bellBadge" class="badge hidden">0</span></button>
+      <button id="profileBtn" class="icon-btn avatar-btn" title="প্রোফাইল" aria-label="প্রোফাইল"><span id="headerAvatar">👤</span></button>
+    </div>
+  </div>
+</header>
+
+<main id="app">
+  <!-- ============ HOME ============ -->
+  <section id="view-home" class="view active">
+    <div id="bannerBox"></div>
+
+    <div class="stats-strip" id="statsStrip"></div>
+
+    <div class="quick-grid">
+      <button class="quick-card red" data-nav="request">🩸<span>রক্তের আবেদন করুন</span></button>
+      <button class="quick-card green" data-nav="donors">🔍<span>ডোনার খুঁজুন</span></button>
+      <button class="quick-card" data-nav="campaigns">🤝<span>দুর্যোগ ও দান</span></button>
+      <button class="quick-card" data-nav="directory">🏥<span>জরুরি ডিরেক্টরি</span></button>
+      <button class="quick-card" data-nav="about">ℹ️<span>আমাদের সম্পর্কে</span></button>
+      <a class="quick-card fb" id="fbGroupBtnHome" href="https://www.facebook.com/share/g/1CYoKfm9sA/" target="_blank" rel="noopener">👥<span>আমাদের ফেসবুক গ্রুপ</span></a>
+    </div>
+
+    <div class="section-head">
+      <h2>🩸 জরুরি রক্তের আবেদন</h2>
+      <div class="filter-row">
+        <select id="homeGroupFilter"><option value="">সব গ্রুপ</option></select>
+        <select id="homeDistrictFilter"><option value="">সব জেলা</option></select>
+        <label class="chk"><input type="checkbox" id="homeOpenOnly" checked> শুধু খোলা</label>
+      </div>
+    </div>
+    <div id="requestFeed" class="feed"><p class="muted center">লোড হচ্ছে…</p></div>
+  </section>
+
+  <!-- ============ DONORS ============ -->
+  <section id="view-donors" class="view">
+    <h2>🔍 ডোনার খুঁজুন</h2>
+    <div class="card search-card">
+      <div class="grid-2">
+        <label>রক্তের গ্রুপ
+          <select id="donorGroup"><option value="">সব গ্রুপ</option></select>
+        </label>
+        <label>জেলা
+          <select id="donorDistrict"><option value="">সব জেলা</option></select>
+        </label>
+        <label>উপজেলা/থানা
+          <input type="text" id="donorUpazila" placeholder="যেমন: সাভার">
+        </label>
+        <label>নাম দিয়ে খুঁজুন
+          <input type="text" id="donorName" placeholder="ডোনারের নাম">
+        </label>
+      </div>
+      <button class="btn primary full" id="donorSearchBtn">খুঁজুন</button>
+    </div>
+    <div id="donorList" class="feed"><p class="muted center">গ্রুপ বা জেলা বেছে খুঁজুন</p></div>
+  </section>
+
+  <!-- ============ REQUEST FORM ============ -->
+  <section id="view-request" class="view">
+    <h2>🩸 রক্তের আবেদন করুন</h2>
+    <p class="muted">আবেদনটি সাথে সাথে প্রকাশ হবে — জরুরি ক্ষেত্রে অনুমোদনের অপেক্ষা করতে হবে না।</p>
+    <form id="requestForm" class="card form">
+      <label>💁‍♂️ রোগীর সমস্যা *<input type="text" name="problem" required placeholder="যেমন: ডেঙ্গু, অপারেশন, থ্যালাসেমিয়া"></label>
+      <div class="grid-2">
+        <label>🔴 রক্তের গ্রুপ *<select name="blood_group" id="reqGroup" required></select></label>
+        <label>💉 রক্তের পরিমাণ *<input type="text" name="quantity" required placeholder="যেমন: ১ ব্যাগ / ২ ব্যাগ"></label>
+      </div>
+      <label>🩸 হিমোগ্লোবিন (যদি জানা থাকে)<input type="text" name="hemoglobin" placeholder="যেমন: 7.5"></label>
+      <label>🏢 রক্তদানের স্থান (হাসপাতাল) *<input type="text" name="hospital" required placeholder="হাসপাতালের নাম"></label>
+      <div class="grid-2">
+        <label>জেলা *<select name="district" id="reqDistrict" required></select></label>
+        <label>উপজেলা/থানা<input type="text" name="upazila" placeholder="যেমন: সাভার"></label>
+      </div>
+      <div class="grid-2">
+        <label>📆 রক্তদানের তারিখ *<input type="date" name="donation_date" required></label>
+        <label>⏰ রক্তদানের সময় *<input type="text" name="donation_time" required placeholder="যেমন: সকাল ১০টা / পাওয়ার পর"></label>
+      </div>
+      <label>☎️ যোগাযোগ নম্বর *<input type="tel" name="contact_phone" required pattern="01[3-9][0-9]{8}" placeholder="01XXXXXXXXX"></label>
+      <label>🚹 রেফারেন্স<input type="text" name="reference" placeholder="যিনি রেফার করেছেন"></label>
+      <button type="submit" class="btn primary full">✅ আবেদন প্রকাশ করুন</button>
+    </form>
+    <h3 style="margin-top:20px">আমার আবেদনসমূহ</h3>
+    <div id="myRequests" class="feed"></div>
+  </section>
+
+  <!-- ============ CAMPAIGNS ============ -->
+  <section id="view-campaigns" class="view">
+    <h2>🤝 দুর্যোগ ও দান</h2>
+    <p class="muted">দুর্যোগে ক্ষতিগ্রস্ত ও অসহায় মানুষের পাশে দাঁড়াতে আমাদের চলমান উদ্যোগসমূহ।</p>
+    <div id="campaignList" class="feed"></div>
+  </section>
+
+  <!-- ============ DIRECTORY ============ -->
+  <section id="view-directory" class="view">
+    <h2>🏥 জরুরি ডিরেক্টরি</h2>
+    <p class="muted">ব্লাড ব্যাংক, হাসপাতাল ও অ্যাম্বুলেন্স — জেলা অনুযায়ী। তালিকাটি আপনার ফোনে সংরক্ষিত থাকে, অফলাইনেও দেখা যায়।</p>
+    <div class="filter-row">
+      <select id="dirDistrict"><option value="">সব জেলা</option></select>
+      <select id="dirType">
+        <option value="">সব ধরন</option>
+        <option value="blood_bank">🩸 ব্লাড ব্যাংক</option>
+        <option value="hospital">🏥 হাসপাতাল</option>
+        <option value="ambulance">🚑 অ্যাম্বুলেন্স</option>
+      </select>
+    </div>
+    <div id="directoryList" class="feed"></div>
+  </section>
+
+  <!-- ============ INBOX ============ -->
+  <section id="view-inbox" class="view">
+    <h2>💬 ইনবক্স</h2>
+    <div id="convList" class="feed"></div>
+  </section>
+
+  <!-- ============ CHAT ============ -->
+  <section id="view-chat" class="view">
+    <button class="btn ghost" id="chatBack">← ইনবক্সে ফিরুন</button>
+    <h2 id="chatTitle">💬 চ্যাট</h2>
+    <div id="chatBox" class="chat-box"></div>
+    <form id="chatForm" class="chat-form">
+      <input type="text" id="chatInput" placeholder="মেসেজ লিখুন…" maxlength="2000" required>
+      <button type="submit" class="btn primary">পাঠান</button>
+    </form>
+  </section>
+
+  <!-- ============ PROFILE ============ -->
+  <section id="view-profile" class="view">
+    <h2>👤 আমার প্রোফাইল</h2>
+    <div id="profileBox"></div>
+  </section>
+
+  <!-- ============ MODERATOR ============ -->
+  <section id="view-moderator" class="view">
+    <h2>🛡️ মডারেটর প্যানেল</h2>
+    <div id="moderatorBox"></div>
+  </section>
+
+  <!-- ============ ADMIN ============ -->
+  <section id="view-admin" class="view">
+    <h2>⚙️ সুপার অ্যাডমিন প্যানেল</h2>
+    <div class="admin-tabs" id="adminTabs">
+      <button data-tab="stats" class="active">📊 পরিসংখ্যান</button>
+      <button data-tab="applications">📋 মডারেটর আবেদন</button>
+      <button data-tab="users">👥 ব্যবহারকারী</button>
+      <button data-tab="reports">🚩 রিপোর্ট</button>
+      <button data-tab="banners">🖼️ ব্যানার</button>
+      <button data-tab="campaigns">🤝 ক্যাম্পেইন</button>
+      <button data-tab="directory">🏥 ডিরেক্টরি</button>
+      <button data-tab="settings">⚙️ সেটিংস</button>
+      <button data-tab="audit">📜 অডিট লগ</button>
+    </div>
+    <div id="adminContent"></div>
+  </section>
+
+  <!-- ============ ABOUT ============ -->
+  <section id="view-about" class="view">
+    <h2>ℹ️ আমাদের সম্পর্কে</h2>
+    <div class="card about-card">
+      <img src="/logo.jpg" alt="লোগো" class="about-logo">
+      <h3>রক্তের সন্ধানে আমরা বাংলাদেশ</h3>
+      <p class="slogan">“রক্ত হোক অন্যের জীবন, রক্তই হোক আত্মার বাঁধন”</p>
+      <p>স্থাপিত: ২০২০</p>
+      <h4>🎯 আমাদের লক্ষ্য</h4>
+      <ol class="mission-list">
+        <li>দেশের প্রতিটি অঞ্চলে রক্তদাতা ম্যানেজ করে দেওয়া।</li>
+        <li>রক্তদানে সচেতনতা বৃদ্ধি করা।</li>
+        <li>দুর্যোগ ক্ষতিগ্রস্ত মানুষের পাশে দাঁড়ানো।</li>
+        <li>অসহায় হতদরিদ্র মানুষের পাশে দাঁড়ানো।</li>
+      </ol>
+      <h4>📞 জরুরি হেল্পলাইন</h4>
+      <p><a id="aboutHelpline1" href="tel:09638877444">09638877444</a> · <a id="aboutHelpline2" href="tel:01966689599">01966689599</a></p>
+      <a id="fbGroupBtnAbout" class="btn fb-btn full" href="https://www.facebook.com/share/g/1CYoKfm9sA/" target="_blank" rel="noopener">👥 আমাদের ফেসবুক গ্রুপে যোগ দিন (২০K+ সদস্য)</a>
+    </div>
+  </section>
+</main>
+
+<!-- Floating emergency call button -->
+<button id="fabCall" class="fab-call" title="জরুরি হেল্পলাইন">📞<span>হেল্পলাইন</span></button>
+<div id="fabMenu" class="fab-menu hidden">
+  <a id="fabCall1" href="tel:09638877444">📞 09638877444</a>
+  <a id="fabCall2" href="tel:01966689599">📞 01966689599</a>
+</div>
+
+<!-- Bottom nav -->
+<nav class="bottom-nav">
+  <button data-nav="home" class="active">🏠<span>হোম</span></button>
+  <button data-nav="donors">🔍<span>ডোনার</span></button>
+  <button data-nav="request" class="nav-cta">🩸<span>আবেদন</span></button>
+  <button data-nav="inbox">💬<span>ইনবক্স</span></button>
+  <button data-nav="profile">👤<span>প্রোফাইল</span></button>
+</nav>
+
+<!-- Auth modal -->
+<div id="authModal" class="modal hidden">
+  <div class="modal-box">
+    <button class="modal-close" data-close="authModal">✕</button>
+    <img src="/logo.jpg" class="modal-logo" alt="লোগো">
+    <h3>লগইন / রেজিস্টার</h3>
+    <div id="authStepPhone">
+      <p class="muted">মোবাইল নম্বরে OTP পাঠানো হবে। এক নম্বরে একটি অ্যাকাউন্ট।</p>
+      <input type="tel" id="authPhone" placeholder="01XXXXXXXXX" pattern="01[3-9][0-9]{8}" maxlength="11">
+      <button class="btn primary full" id="sendOtpBtn">OTP পাঠান</button>
+    </div>
+    <div id="authStepOtp" class="hidden">
+      <p class="muted"><span id="otpPhoneLabel"></span> নম্বরে পাঠানো ৬ সংখ্যার OTP দিন</p>
+      <input type="text" id="authOtp" placeholder="৬ সংখ্যার OTP" maxlength="6" inputmode="numeric">
+      <div id="devOtpBox" class="dev-otp hidden"></div>
+      <button class="btn primary full" id="verifyOtpBtn">যাচাই করুন</button>
+      <button class="btn ghost full" id="resendOtpBtn">আবার OTP পাঠান</button>
+    </div>
+    <div id="authStepRegister" class="hidden">
+      <p class="muted">নতুন অ্যাকাউন্ট — তথ্যগুলো দিন</p>
+      <form id="registerForm" class="form">
+        <label>পূর্ণ নাম *<input type="text" name="name" required></label>
+        <label>জন্ম তারিখ *<input type="date" name="dob" id="regDob" required></label>
+        <p class="muted small" id="regAgeNote"></p>
+        <label>লিঙ্গ
+          <select name="gender"><option value="">বেছে নিন</option><option value="পুরুষ">পুরুষ</option><option value="মহিলা">মহিলা</option></select>
+        </label>
+        <label>রক্তের গ্রুপ *<select name="blood_group" id="regGroup" required></select></label>
+        <label>জেলা<select name="district" id="regDistrict"></select></label>
+        <label>উপজেলা/থানা<input type="text" name="upazila" placeholder="যেমন: সাভার"></label>
+        <label>শেষ রক্তদানের তারিখ<input type="date" name="last_donation"></label>
+        <label>প্রোফাইল ছবি
+          <input type="file" id="regPhoto" accept="image/*">
+          <img id="regPhotoPreview" class="photo-preview hidden" alt="ছবি">
+        </label>
+        <label class="chk"><input type="checkbox" name="photo_hidden"> ছবি লুকান (প্রোফাইলে ছবি দেখাবে না)</label>
+        <button type="submit" class="btn primary full">রেজিস্টার করুন</button>
+      </form>
+    </div>
+    <p id="authError" class="error hidden"></p>
+  </div>
+</div>
+
+<!-- Generic modal -->
+<div id="genericModal" class="modal hidden">
+  <div class="modal-box">
+    <button class="modal-close" data-close="genericModal">✕</button>
+    <div id="genericModalContent"></div>
+  </div>
+</div>
+
+<!-- Notifications drawer -->
+<div id="notifDrawer" class="modal hidden">
+  <div class="modal-box">
+    <button class="modal-close" data-close="notifDrawer">✕</button>
+    <h3>🔔 নোটিফিকেশন</h3>
+    <button class="btn ghost" id="markAllReadBtn">সব পড়া হিসেবে চিহ্নিত করুন</button>
+    <div id="notifList"></div>
+  </div>
+</div>
+
+<!-- Certificate modal -->
+<div id="certModal" class="modal hidden">
+  <div class="modal-box wide">
+    <button class="modal-close" data-close="certModal">✕</button>
+    <div id="certContent"></div>
+    <div class="btn-row">
+      <button class="btn primary" id="certDownloadBtn">🖼️ PNG ডাউনলোড</button>
+      <button class="btn" onclick="window.print()">🖨️ প্রিন্ট</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+<script src="/app.js"></script>
+</body>
+</html>
